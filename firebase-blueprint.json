@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["marketing", "department"] },
+        "department": { "type": "string", "enum": ["Litigation", "Corporate", "HR", "Accounting", "Operations", "Marketing"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "MarketingRequest": {
+      "title": "Marketing Request",
+      "description": "A request for marketing work",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "requestTitle": { "type": "string" },
+        "description": { "type": "string" },
+        "requestedBy": { "type": "string", "description": "User UID" },
+        "requestedByEmail": { "type": "string" },
+        "department": { "type": "string", "enum": ["Litigation", "Corporate", "HR", "Accounting", "Operations"] },
+        "brand": { "type": "string", "enum": ["STLAF", "MassagedailyPH", "LuxeLounge"] },
+        "requestType": { "type": "string", "enum": ["Photo/Video Editing", "Social Media Content", "Graphic Design", "Marketing Collateral", "Website / Digital", "Other"] },
+        "priority": { "type": "string", "enum": ["Low", "Normal", "Urgent"] },
+        "dateRequested": { "type": "string", "format": "date-time" },
+        "dateNeeded": { "type": "string", "format": "date" },
+        "assignedTo": { "type": "string", "enum": ["Chloie", "KCS", "Charleth", "Enzo", "Pat", "Khian", "Unassigned"] },
+        "status": { "type": "string", "enum": ["Pending", "Assigned", "In Progress", "For Review", "Revision Needed", "Completed"] },
+        "internalNotes": { "type": "string" },
+        "revisionNotes": { "type": "string" },
+        "requestAttachmentUrl": { "type": "string" },
+        "requestAttachmentName": { "type": "string" },
+        "deliverableFileUrl": { "type": "string" },
+        "deliverableFileName": { "type": "string" }
+      },
+      "required": ["requestTitle", "description", "requestedBy", "department", "brand", "requestType", "priority", "dateRequested", "dateNeeded", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notifications",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Recipient UID" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["new_request", "assignment", "status_change", "completion"] },
+        "requestId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["userId", "title", "message", "type", "requestId", "createdAt", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/marketing_requests/{requestId}": {
+      "schema": "MarketingRequest",
+      "description": "Marketing requests"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    }
+  }
+}

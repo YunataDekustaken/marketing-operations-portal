@@ -1,0 +1,245 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - role: string (required, enum: ['marketing_supervisor', 'marketing_member', 'department'])
+    //   - department: string (required)
+    //
+    // Collection: marketing_requests
+    // Document ID: {requestId}
+    // Fields:
+    //   - requestId: string
+    //   - requestTitle: string (required)
+    //   - description: string (required)
+    //   - requestedBy: string (required, uid)
+    //   - requestedByEmail: string
+    //   - department: string (required)
+    //   - brand: string (required)
+    //   - requestType: string (required)
+    //   - priority: string (required)
+    //   - dateRequested: timestamp (required)
+    //   - dateNeeded: string (required)
+    //   - assignedTo: string
+    //   - assignedToName: string
+    //   - status: string (required)
+    //
+    // Collection: notifications
+    // Document ID: {notificationId}
+    // Fields:
+    //   - userId: string (required, recipient uid)
+    //   - title: string (required)
+    //   - message: string (required)
+    //   - type: string (required, enum)
+    //   - requestId: string (required)
+    //   - createdAt: timestamp (required)
+    //   - read: boolean (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isDefaultAdmin() {
+      return isAuthenticated() && 
+             request.auth.token.email in ["kenmaderagd@gmail.com", "chloie@stlafglobal.com", "kcs@stlafglobal.com"];
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        isDefaultAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'marketing_supervisor')
+      );
+    }
+
+    function isMarketingSupervisor() {
+      return isAdmin();
+    }
+
+    function isMarketingTeam() {
+      return isAuthenticated() && (
+        isDefaultAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['marketing_supervisor', 'marketing_member'])
+      );
+    }
+
+    function isDepartment() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        getUserData().role == 'department';
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidString(field, maxLen) {
+      return !(field in request.resource.data) || (request.resource.data[field] is string && request.resource.data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['department', 'marketing_member', 'marketing_supervisor'] &&
+             data.department is string && data.department.size() <= 100 &&
+             isValidString('displayName', 100);
+    }
+
+    function isValidMarketingRequest(data) {
+      return data.requestTitle is string && data.requestTitle.size() <= 200 &&
+             data.description is string && data.description.size() <= 2000 &&
+             data.requestedBy is string &&
+             data.status in ['Pending', 'Assigned', 'In Progress', 'For Review', 'Revision Needed', 'Completed', 'Cancelled'] &&
+             isValidString('brand', 100) &&
+             isValidString('requestType', 100) &&
+             isValidString('priority', 50) &&
+             isValidString('assignedTo', 100) &&
+             isValidString('assignedToName', 100) &&
+             isValidString('deliverableLink', 1000) &&
+             isValidString('deliverableFileName', 500) &&
+             isValidString('deliverableFileUrl', 2000) &&
+             isValidString('revisionNotes', 2000) &&
+             isValidString('estimatedCompletionDate', 100) &&
+             (!('revisionCount' in data) || data.revisionCount is number) &&
+             (!('locked' in data) || data.locked is bool) &&
+             (!('previouslyLocked' in data) || data.previouslyLocked is bool) &&
+             (!('dateRequested' in data) || data.dateRequested is timestamp) &&
+             (!('completedAt' in data) || data.completedAt is timestamp) &&
+             (!('revisions' in data) || data.revisions is list) &&
+             (!('resubmissions' in data) || data.resubmissions is list);
+    }
+
+    function isValidNotification(data) {
+      return data.userId is string &&
+             data.title is string && data.title.size() <= 200 &&
+             data.message is string && data.message.size() <= 1000 &&
+             data.type is string &&
+             data.requestId is string &&
+             data.read is bool &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      
+      allow create: if (isOwner(userId) || isAdmin()) && 
+                      request.resource.data.uid == userId &&
+                      isValidUser(request.resource.data);
+      
+      allow update: if (isOwner(userId) || isAdmin()) && 
+                      isValidUser(request.resource.data) &&
+                      (request.resource.data.role == resource.data.role || isAdmin()) &&
+                      request.resource.data.uid == resource.data.uid;
+    }
+
+    match /marketing_requests/{requestId} {
+      allow read: if isAdmin() || isMarketingTeam() || (
+        isAuthenticated() && resource.data.requestedBy == request.auth.uid
+      );
+      
+      allow create: if isAuthenticated() && 
+                      request.resource.data.requestedBy == request.auth.uid &&
+                      isValidMarketingRequest(request.resource.data) &&
+                      (
+                        request.resource.data.status == 'Pending' ||
+                        (isMarketingSupervisor() && request.resource.data.status == 'Assigned') ||
+                        (isMarketingTeam() && request.resource.data.status == 'Completed')
+                      );
+
+      allow update: if isAdmin() || isMarketingSupervisor() || (
+        isMarketingTeam() && 
+        isValidMarketingRequest(request.resource.data) &&
+        (!('locked' in resource.data) || resource.data.locked != true || isMarketingSupervisor()) &&
+        (
+          resource.data.assignedTo == request.auth.uid || 
+          resource.data.assignedTo == 'Unassigned' ||
+          resource.data.assignedTo == null ||
+          !('assignedTo' in resource.data)
+        )
+      ) || (
+        isAuthenticated() && 
+        resource.data.requestedBy == request.auth.uid &&
+        isValidMarketingRequest(request.resource.data) &&
+        (!('locked' in resource.data) || resource.data.locked != true || isMarketingSupervisor()) &&
+        (
+          resource.data.status in ['Pending', 'Revision Needed', 'For Review'] ||
+          (resource.data.status == 'Completed' && (request.resource.data.status == 'Revision Needed' || request.resource.data.locked == true))
+        )
+      );
+      
+      allow delete: if isAdmin() || isMarketingSupervisor();
+
+      match /comments/{commentId} {
+        allow read: if isAdmin() || isMarketingTeam() || (
+          isAuthenticated() && get(/databases/$(database)/documents/marketing_requests/$(requestId)).data.requestedBy == request.auth.uid
+        );
+        allow create: if isAuthenticated() && (
+          isAdmin() || isMarketingTeam() || 
+          get(/databases/$(database)/documents/marketing_requests/$(requestId)).data.requestedBy == request.auth.uid
+        ) && request.resource.data.userId == request.auth.uid;
+        allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+        allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      }
+
+      match /activityLog/{logId} {
+        allow read: if isAdmin() || isMarketingTeam() || (
+          isAuthenticated() && get(/databases/$(database)/documents/marketing_requests/$(requestId)).data.requestedBy == request.auth.uid
+        );
+        allow create: if isAuthenticated() && (
+          isAdmin() || isMarketingTeam() || 
+          get(/databases/$(database)/documents/marketing_requests/$(requestId)).data.requestedBy == request.auth.uid
+        ) && request.resource.data.userId == request.auth.uid;
+        allow update: if false; // Activity logs should be immutable
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAdmin() || isMarketingSupervisor() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && 
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      
+      allow create: if isAuthenticated() && 
+                      request.resource.data.userId != null &&
+                      isValidNotification(request.resource.data);
+      
+      allow delete: if isAdmin() || isMarketingSupervisor() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+  }
+}
